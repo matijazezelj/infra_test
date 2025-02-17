@@ -1,0 +1,16 @@
+opensearchHosts: "https://opensearch-cluster-master:9200"
+
+## Authentication
+extraEnvs:
+  - name: "OPENSEARCH_USERNAME"
+    value: "admin"
+  - name: "OPENSEARCH_PASSWORD"
+    value: "YourStrongPassword1!"
+
+## Service Exposure
+service:
+  type: LoadBalancer
+  port: 5601
+
+## Replica Count
+replicas: 1

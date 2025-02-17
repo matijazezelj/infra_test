@@ -1,0 +1,53 @@
+clusterName: "opensearch-cluster"
+nodeGroup: "opensearch"
+
+## Node Settings
+replicas: 3
+persistence:
+  enabled: true
+  size: 10Gi
+
+## Authentication Setup (Secret for admin user)
+extraEnvs:
+  - name: "OPENSEARCH_INITIAL_ADMIN_PASSWORD"
+    value: "YourStrongPassword1!"
+
+## Security Settings
+opensearchSecurity:
+  enabled: true
+  config:
+    securityConfig:
+      enabled: true
+      path: "/usr/share/opensearch/config/opensearch-security"
+      dataComplete: true
+      data:
+        # Internal users configuration (adding admin user)
+        internal_users.yml: |
+          admin:
+            hash: "$2a$12$w5bMG5n87vFq2esnpt8wPoa5Idv6FbmAMQFqgGomN3m35pZ.Qqg8m"  # This is bcrypt hash of "YourStrongPassword1!"
+            roles:
+              - admin
+            description: "Admin User"
+            enabled: true
+        roles.yml: |
+          admin:
+            cluster:
+              - "all"
+            index:
+              - "all"
+        roles_mapping.yml: |
+          admin:
+            users:
+              - "admin"
+        action_groups.yml: |
+          admin:
+            cluster:
+              - "cluster_all"
+        tenants.yml: |
+          default:
+            - admin
+
+## OpenSearch Service (API Access)
+service:
+  type: ClusterIP # Internal-only access, no external exposure
+  port: 9200

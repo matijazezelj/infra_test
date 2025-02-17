@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: vector
+data:
+  vector.yaml: |
+    data_dir: "/vector-data-dir"
+
+    sources:
+      kubernetes_logs:
+        type: "kubernetes_logs"
+
+    transforms:
+      remap_to_ecs:
+        type: "remap"
+        inputs: ["kubernetes_logs"]
+        source: |
+          .event.sequence = to_int!(.log.offset) ?? 0  # Convert log offset to event.sequence
+          .["@timestamp"] = .time ?? now()  # Use log time or current time
+          .log.level = downcase!(.log.level) ?? "info"  # Normalize log level
+          .message = .log.message ?? "No message"  # Preserve original message
+          .container.id = .kubernetes.container_id ?? "unknown"
+          .kubernetes.pod.name = .kubernetes.pod_name ?? "unknown"
+
+          # Move all other fields under "other.*"
+          del(.log.offset)
+          del(.log.time)
+          del(.log.message)
+          del(.kubernetes.container_id)
+          del(.kubernetes.pod_name)
+
+          .other = object!(del(.))  # Move all remaining fields to "other"
+
+    sinks:
+      opensearch:
+        type: "elasticsearch"
+        inputs: ["remap_to_ecs"]
+        endpoint: "http://opensearch-cluster-opensearch.opensearch.svc.cluster.local:9200"
+        auth:
+          strategy: "basic"
+          user: "admin"
+          password: "YourStrongPassword1!"
+        index: "k8s-logs"
