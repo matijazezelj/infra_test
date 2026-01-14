@@ -1,0 +1,63 @@
+# NATS Helm Chart Values
+# Docs: https://docs.nats.io/running-a-nats-service/nats-kubernetes/helm-charts
+
+# Enable JetStream for persistent message streaming
+config:
+  jetstream:
+    enabled: true
+    fileStore:
+      enabled: true
+      pvc:
+        enabled: true
+        size: 10Gi
+        storageClassName: ""  # Use default storage class
+    # Memory store for faster access (optional)
+    memoryStore:
+      enabled: true
+      maxSize: 256Mi
+
+  cluster:
+    enabled: true
+    replicas: 3
+
+  # Merge configuration for the cluster
+  merge:
+    max_payload: 8MB  # Allow larger log messages
+
+# Replicas for high availability
+container:
+  image:
+    repository: nats
+    tag: "2.10-alpine"
+    pullPolicy: IfNotPresent
+
+  merge:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+# Pod security context
+podTemplate:
+  merge:
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+# Service configuration
+service:
+  enabled: true
+  ports:
+    nats:
+      enabled: true
+      port: 4222
+
+# Monitoring
+promExporter:
+  enabled: true
+  port: 7777

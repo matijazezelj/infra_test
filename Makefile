@@ -1,29 +1,35 @@
-# Makefile for deploying AKS, OpenSearch, and Vector
+# Makefile for deploying AKS, OpenSearch, NATS, and Vector
 
 # Set variables
 TERRAFORM_DIR=terraform
 K8S_NAMESPACE_OPENSEARCH=opensearch
 K8S_NAMESPACE_VECTOR=vector
+K8S_NAMESPACE_NATS=nats
 TF_PLAN_OUTPUT=tfplan.out
 
-.PHONY: help infra infra-plan infra-apply search dashboard logcollector destroy clean secrets network-policies sysctl
+.PHONY: help infra infra-plan infra-apply search dashboard queue logcollector logcollector-agent logcollector-aggregator destroy clean secrets network-policies sysctl
 
 ## 🆘 Display help message with available commands
 help:
 	@echo "Usage: make <command>"
 	@echo ""
 	@echo "Available commands:"
-	@echo "  sysctl           - Apply sysctl configuration (required for OpenSearch)"
-	@echo "  infra-plan       - Generate Terraform execution plan (Azure only)"
-	@echo "  infra-apply      - Apply Terraform execution plan (Azure only)"
-	@echo "  infra            - Run both plan and apply (Azure only)"
-	@echo "  search           - Deploy OpenSearch (StatefulSet) with Helm"
-	@echo "  dashboard        - Deploy OpenSearch Dashboards with Helm"
-	@echo "  secrets          - Create Kubernetes secrets for Vector"
-	@echo "  network-policies - Apply network policies for security"
-	@echo "  logcollector     - Deploy Vector (Log Collector) with Helm"
-	@echo "  destroy          - Uninstall Helm releases (optionally destroy Terraform)"
-	@echo "  clean            - Remove Terraform state files"
+	@echo "  sysctl              - Apply sysctl configuration (required for OpenSearch)"
+	@echo "  infra-plan          - Generate Terraform execution plan (Azure only)"
+	@echo "  infra-apply         - Apply Terraform execution plan (Azure only)"
+	@echo "  infra               - Run both plan and apply (Azure only)"
+	@echo "  search              - Deploy OpenSearch (StatefulSet) with Helm"
+	@echo "  dashboard           - Deploy OpenSearch Dashboards with Helm"
+	@echo "  queue               - Deploy NATS JetStream for log buffering"
+	@echo "  secrets             - Create Kubernetes secrets for Vector"
+	@echo "  network-policies    - Apply network policies for security"
+	@echo "  logcollector        - Deploy Vector Agent + Aggregator (with NATS queue)"
+	@echo "  logcollector-agent  - Deploy Vector Agent only (sends to NATS)"
+	@echo "  logcollector-agg    - Deploy Vector Aggregator only (NATS to OpenSearch)"
+	@echo "  destroy             - Uninstall Helm releases (optionally destroy Terraform)"
+	@echo "  clean               - Remove Terraform state files"
+	@echo ""
+	@echo "Deployment order: sysctl -> search -> dashboard -> queue -> secrets -> logcollector"
 	@echo ""
 	@echo "Run 'make <command>' to execute."
 
@@ -59,7 +65,15 @@ dashboard:
 	  --create-namespace --namespace $(K8S_NAMESPACE_OPENSEARCH) \
 	  --values opensearch-dashboards-values.yaml
 
-## � Create Kubernetes secrets for Vector
+## 📬 Deploy NATS JetStream for log buffering
+queue:
+	helm repo add nats https://nats-io.github.io/k8s/helm/charts/
+	helm repo update
+	helm upgrade --install nats nats/nats \
+	  --create-namespace --namespace $(K8S_NAMESPACE_NATS) \
+	  --values nats-values.yaml
+
+## 🔑 Create Kubernetes secrets for Vector
 secrets:
 	kubectl create namespace $(K8S_NAMESPACE_VECTOR) --dry-run=client -o yaml | kubectl apply -f -
 	kubectl create namespace $(K8S_NAMESPACE_OPENSEARCH) --dry-run=client -o yaml | kubectl apply -f -
@@ -71,20 +85,33 @@ secrets:
 network-policies:
 	kubectl apply -f network-policies.yaml
 
-## 📥 Deploy Vector (Log Collector) with Helm
-logcollector:
+## 📥 Deploy Vector Agent (collects logs, sends to NATS)
+logcollector-agent:
 	helm repo add vector https://helm.vector.dev
 	helm repo update
-	helm upgrade --install vector vector/vector \
+	helm upgrade --install vector-agent vector/vector \
 	  --create-namespace --namespace $(K8S_NAMESPACE_VECTOR) \
-	  --values vector-values.yaml
+	  --values vector-agent-values.yaml
+
+## 📥 Deploy Vector Aggregator (consumes from NATS, sends to OpenSearch)
+logcollector-agg:
+	helm repo add vector https://helm.vector.dev
+	helm repo update
+	helm upgrade --install vector-aggregator vector/vector \
+	  --create-namespace --namespace $(K8S_NAMESPACE_VECTOR) \
+	  --values vector-aggregator-values.yaml
+
+## 📥 Deploy Vector Agent + Aggregator (full log pipeline with NATS queue)
+logcollector: logcollector-agent logcollector-agg
 
 ## 🔥 Destroy All Resources
 destroy:
 	@echo "Uninstalling Helm releases..."
 	helm uninstall opensearch --namespace $(K8S_NAMESPACE_OPENSEARCH) --ignore-not-found
 	helm uninstall opensearch-dashboards --namespace $(K8S_NAMESPACE_OPENSEARCH) --ignore-not-found
-	helm uninstall vector --namespace $(K8S_NAMESPACE_VECTOR) --ignore-not-found
+	helm uninstall vector-agent --namespace $(K8S_NAMESPACE_VECTOR) --ignore-not-found
+	helm uninstall vector-aggregator --namespace $(K8S_NAMESPACE_VECTOR) --ignore-not-found
+	helm uninstall nats --namespace $(K8S_NAMESPACE_NATS) --ignore-not-found
 	
 	@echo "Deleting sysctl DaemonSet..."
 	kubectl delete -f sysctl-daemonset.yaml --ignore-not-found
@@ -92,6 +119,7 @@ destroy:
 	@echo "Deleting Kubernetes namespaces..."
 	kubectl delete namespace $(K8S_NAMESPACE_OPENSEARCH) --ignore-not-found
 	kubectl delete namespace $(K8S_NAMESPACE_VECTOR) --ignore-not-found
+	kubectl delete namespace $(K8S_NAMESPACE_NATS) --ignore-not-found
 
 ## 🔥 Destroy All Resources including Terraform (Azure only)
 destroy-all: destroy

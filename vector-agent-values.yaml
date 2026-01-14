@@ -1,0 +1,142 @@
+# Vector Agent Helm Chart Values
+# This agent collects logs from Kubernetes nodes and sends them to NATS
+# Docs: https://vector.dev/docs/setup/installation/package-managers/helm/
+
+# Run Vector as a DaemonSet to collect logs from all nodes
+role: Agent
+
+# Service configuration for metrics/API
+service:
+  enabled: true
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 8686
+      protocol: TCP
+      targetPort: 8686
+
+# Environment variables
+env:
+  - name: VECTOR_LOG
+    value: "info"
+  # Dynamically get the node name from the Kubernetes downward API
+  - name: VECTOR_SELF_NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+
+# Pod configuration
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8686"
+
+# Security context - run as non-root with minimal privileges
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Tolerations to run on all nodes including control plane
+tolerations:
+  - operator: Exists
+    effect: NoSchedule
+
+# Vector configuration
+customConfig:
+  data_dir: /vector-data-dir
+
+  api:
+    enabled: true
+    address: "0.0.0.0:8686"
+    playground: false  # Disable in production
+
+  sources:
+    kubernetes_logs:
+      type: kubernetes_logs
+      # Use environment variable for node name (set via downward API)
+      self_node_name: "${VECTOR_SELF_NODE_NAME}"
+      # Exclude Vector's own logs to avoid feedback loops
+      exclude_paths_glob_patterns:
+        - "**/vector*/**"
+
+  transforms:
+    # Parse and enrich log data
+    parse_logs:
+      type: remap
+      inputs:
+        - kubernetes_logs
+      source: |
+        # Add timestamp if missing
+        .timestamp = .timestamp ?? now()
+        
+        # Parse JSON logs if possible
+        if is_string(.message) {
+          parsed, err = parse_json(.message)
+          if err == null {
+            . = merge(., parsed)
+          }
+        }
+        
+        # Add useful metadata
+        .environment = "production"
+        .cluster = "aks"
+
+    # Filter out noisy/unnecessary logs (optional)
+    filter_logs:
+      type: filter
+      inputs:
+        - parse_logs
+      condition: |
+        # Keep all logs by default, customize as needed
+        true
+
+  sinks:
+    # Send logs to NATS JetStream for buffering
+    nats:
+      type: nats
+      inputs:
+        - filter_logs
+      url: "nats://nats.nats.svc.cluster.local:4222"
+      subject: "logs.kubernetes"
+      # Encode as JSON for the aggregator to parse
+      encoding:
+        codec: json
+      # Buffer configuration for reliability
+      buffer:
+        type: disk
+        max_size: 268435488  # 256MB
+        when_full: block
+      # Healthcheck
+      healthcheck:
+        enabled: true
+
+    # Console sink for debugging (optional, can be removed in production)
+    # console_debug:
+    #   type: console
+    #   inputs:
+    #     - filter_logs
+    #   encoding:
+    #     codec: json
+
+# Persistence for buffer
+persistence:
+  enabled: true
+  size: 1Gi
+
+# Resource limits
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

@@ -1,12 +1,41 @@
-# Kubernetes Log Collection with OpenSearch, Dashboards, and Vector
+# Kubernetes Log Collection with OpenSearch, NATS, and Vector
 
-This setup deploys an end-to-end log collection and visualization solution using **OpenSearch**, **OpenSearch Dashboards**, and **Vector** on a Kubernetes cluster.
+This setup deploys an end-to-end log collection and visualization solution using **OpenSearch**, **OpenSearch Dashboards**, **NATS JetStream**, and **Vector** on a Kubernetes cluster.
 
 The architecture includes:
 
 - **OpenSearch**: A distributed search and analytics engine.
 - **OpenSearch Dashboards**: A web UI for interacting with OpenSearch.
-- **Vector**: A log collector that sends logs to OpenSearch.
+- **NATS JetStream**: A lightweight message queue for log buffering and durability.
+- **Vector Agent**: A log collector that sends logs to NATS.
+- **Vector Aggregator**: Consumes logs from NATS and sends to OpenSearch.
+
+## Architecture
+
+```
+┌─────────────┐     ┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
+│   K8s Pods  │ ──▶ │   Vector    │ ──▶ │  NATS JetStream  │ ──▶ │   Vector    │
+│   (logs)    │     │   Agent     │     │     (Queue)      │     │  Aggregator │
+└─────────────┘     └─────────────┘     └──────────────────┘     └──────┬──────┘
+                                                                        │
+                                                                        ▼
+                                                               ┌─────────────────┐
+                                                               │   OpenSearch    │
+                                                               │    Cluster      │
+                                                               └────────┬────────┘
+                                                                        │
+                                                                        ▼
+                                                               ┌─────────────────┐
+                                                               │   OpenSearch    │
+                                                               │   Dashboards    │
+                                                               └─────────────────┘
+```
+
+**Why NATS JetStream?**
+- **Durability**: Logs are persisted in NATS, so if OpenSearch goes down, no logs are lost.
+- **Backpressure handling**: NATS buffers logs during OpenSearch maintenance or outages.
+- **Lightweight**: NATS uses ~10MB of memory vs. Kafka's ~300MB+.
+- **Simple operations**: No ZooKeeper, minimal configuration required.
 
 ## Prerequisites
 
@@ -32,9 +61,9 @@ The setup is divided into the following steps:
 1. **Cluster Setup**: Ensure your Kubernetes cluster has Network Policy support enabled.
 2. **Sysctl Configuration**: Apply the sysctl DaemonSet (required for OpenSearch).
 3. **Secrets**: Create Kubernetes secrets for credentials (never commit to git).
-4. **Helm**: Deploy OpenSearch and OpenSearch Dashboards.
+4. **Helm**: Deploy OpenSearch, OpenSearch Dashboards, and NATS.
 5. **Network Policies**: Apply network segmentation for security.
-6. **Vector**: Collect and forward logs to OpenSearch.
+6. **Vector**: Deploy Agent (log collection) and Aggregator (send to OpenSearch).
 
 > **Note**: Terraform is optional. This setup works with any Kubernetes cluster.
 
@@ -144,25 +173,40 @@ make network-policies
 ```
 
 This applies network policies that:
-- Only allow Vector to communicate with OpenSearch on port 9200.
+- Only allow Vector Agent to communicate with NATS on port 4222.
+- Only allow Vector Aggregator to communicate with NATS and OpenSearch.
 - Only allow Dashboards to communicate with OpenSearch.
 - Restrict ingress to Dashboards from ingress controller only.
-- Allow OpenSearch inter-node communication on port 9300.
+- Allow OpenSearch and NATS inter-node communication for clustering.
 
-### 7. Deploy Vector for Log Collection
+### 7. Deploy NATS JetStream
 
-Deploy **Vector** as a DaemonSet for log collection:
+Deploy **NATS JetStream** for log buffering:
+
+```bash
+make queue
+```
+
+This command will:
+- Deploy NATS with JetStream enabled (3 replicas for HA).
+- Configure persistent storage (10Gi per node).
+- Enable Prometheus metrics on port 7777.
+- Allow up to 8MB message payloads.
+
+### 8. Deploy Vector for Log Collection
+
+Deploy **Vector Agent** and **Aggregator**:
 
 ```bash
 make logcollector
 ```
 
 This command will:
-- Deploy **Vector** on all nodes using a DaemonSet.
-- Configure TLS with certificate verification enabled.
-- Run as non-root with read-only filesystem.
-- Use disk-based buffering for reliability.
-- Parse and enrich logs with transforms.
+- Deploy **Vector Agent** on all nodes using a DaemonSet to collect logs.
+- Deploy **Vector Aggregator** as a Deployment (2 replicas) to send to OpenSearch.
+- Configure disk-based buffering at each layer for reliability.
+- Use NATS JetStream as the queue between Agent and Aggregator.
+- Enable HPA for Aggregator to scale under load.
 
 ---
 
@@ -176,6 +220,7 @@ kubectl apply -f sysctl-daemonset.yaml
 
 # 2. Create namespaces
 kubectl create namespace opensearch
+kubectl create namespace nats
 kubectl create namespace vector
 
 # 3. Create secrets
@@ -191,6 +236,7 @@ kubectl create secret generic opensearch-credentials \
 
 # 4. Add Helm repos
 helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+helm repo add nats https://nats-io.github.io/k8s/helm/charts/
 helm repo add vector https://helm.vector.dev
 helm repo update
 
@@ -204,18 +250,27 @@ helm upgrade --install opensearch-dashboards opensearch/opensearch-dashboards \
   --namespace opensearch \
   --values opensearch-dashboards-values.yaml
 
-# 7. Apply network policies
-kubectl apply -f network-policies.yaml
+# 7. Deploy NATS JetStream
+helm upgrade --install nats nats/nats \
+  --namespace nats \
+  --values nats-values.yaml
 
-# 8. Deploy Vector
-helm upgrade --install vector vector/vector \
+# 8. Deploy Vector Agent + Aggregator
+helm upgrade --install vector-agent vector/vector \
   --namespace vector \
-  --values vector-values.yaml
+  --values vector-agent-values.yaml
+
+helm upgrade --install vector-aggregator vector/vector \
+  --namespace vector \
+  --values vector-aggregator-values.yaml
+
+# 9. Apply network policies
+kubectl apply -f network-policies.yaml
 ```
 
 ---
 
-### 8. Access the Services
+### 9. Access the Services
 
 #### OpenSearch Dashboards (Recommended: Use Ingress)
 

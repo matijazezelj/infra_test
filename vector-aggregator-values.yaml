@@ -1,0 +1,168 @@
+# Vector Aggregator Helm Chart Values
+# This aggregator consumes logs from NATS and sends them to OpenSearch
+# Docs: https://vector.dev/docs/setup/installation/package-managers/helm/
+
+# Run Vector as an Aggregator (Deployment, not DaemonSet)
+role: Aggregator
+
+# Replicas for high availability
+replicas: 2
+
+# Service configuration for metrics/API
+service:
+  enabled: true
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 8686
+      protocol: TCP
+      targetPort: 8686
+
+# Environment variables
+env:
+  - name: VECTOR_LOG
+    value: "info"
+  # Use secrets for sensitive data (required)
+  - name: OPENSEARCH_USERNAME
+    valueFrom:
+      secretKeyRef:
+        name: opensearch-credentials
+        key: username
+        optional: false
+  - name: OPENSEARCH_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: opensearch-credentials
+        key: password
+        optional: false
+
+# Pod configuration
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8686"
+
+# Security context - run as non-root with minimal privileges
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Pod anti-affinity for HA
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: vector-aggregator
+          topologyKey: kubernetes.io/hostname
+
+# Vector configuration
+customConfig:
+  data_dir: /vector-data-dir
+
+  api:
+    enabled: true
+    address: "0.0.0.0:8686"
+    playground: false  # Disable in production
+
+  sources:
+    # Consume logs from NATS JetStream
+    nats_logs:
+      type: nats
+      url: "nats://nats.nats.svc.cluster.local:4222"
+      subject: "logs.kubernetes"
+      # JetStream configuration for persistent subscriptions
+      queue: "vector-aggregator"
+      # Parse incoming JSON logs
+      decoding:
+        codec: json
+      # Connection settings
+      connection_name: "vector-aggregator"
+
+  transforms:
+    # Add aggregator-specific metadata
+    enrich_logs:
+      type: remap
+      inputs:
+        - nats_logs
+      source: |
+        # Add processing timestamp
+        .processed_at = now()
+        
+        # Ensure required fields exist
+        .timestamp = .timestamp ?? now()
+
+  sinks:
+    opensearch:
+      type: elasticsearch
+      inputs:
+        - enrich_logs
+      endpoints:
+        - "https://opensearch-cluster-master.opensearch.svc.cluster.local:9200"
+      auth:
+        strategy: basic
+        user: "${OPENSEARCH_USERNAME}"
+        # Use environment variable for password (from secret)
+        password: "${OPENSEARCH_PASSWORD}"
+      tls:
+        verify_certificate: true
+        verify_hostname: true
+      bulk:
+        index: "kubernetes-logs-%Y.%m.%d"
+        action: create
+      # Buffer configuration for reliability
+      buffer:
+        type: disk
+        max_size: 536870912  # 512MB - larger buffer for aggregator
+        when_full: block
+      # Batch settings for better throughput
+      batch:
+        max_bytes: 10485760  # 10MB
+        timeout_secs: 1
+      # Request settings with retries
+      request:
+        retry_initial_backoff_secs: 1
+        retry_max_duration_secs: 300
+      # Healthcheck
+      healthcheck:
+        enabled: true
+
+    # Console sink for debugging (optional, can be removed in production)
+    # console_debug:
+    #   type: console
+    #   inputs:
+    #     - enrich_logs
+    #   encoding:
+    #     codec: json
+
+# Persistence for buffer
+persistence:
+  enabled: true
+  size: 5Gi  # Larger buffer for aggregator
+
+# Resource limits - aggregator needs more resources
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# Horizontal Pod Autoscaler (optional)
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
