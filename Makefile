@@ -6,36 +6,41 @@ K8S_NAMESPACE_OPENSEARCH=opensearch
 K8S_NAMESPACE_VECTOR=vector
 TF_PLAN_OUTPUT=tfplan.out
 
-.PHONY: help infra infra-plan infra-apply search dashboard logcollector destroy clean secrets network-policies
+.PHONY: help infra infra-plan infra-apply search dashboard logcollector destroy clean secrets network-policies sysctl
 
 ## 🆘 Display help message with available commands
 help:
 	@echo "Usage: make <command>"
 	@echo ""
 	@echo "Available commands:"
-	@echo "  infra-plan       - Generate Terraform execution plan"
-	@echo "  infra-apply      - Apply Terraform execution plan"
-	@echo "  infra            - Run both plan and apply"
+	@echo "  sysctl           - Apply sysctl configuration (required for OpenSearch)"
+	@echo "  infra-plan       - Generate Terraform execution plan (Azure only)"
+	@echo "  infra-apply      - Apply Terraform execution plan (Azure only)"
+	@echo "  infra            - Run both plan and apply (Azure only)"
 	@echo "  search           - Deploy OpenSearch (StatefulSet) with Helm"
 	@echo "  dashboard        - Deploy OpenSearch Dashboards with Helm"
 	@echo "  secrets          - Create Kubernetes secrets for Vector"
 	@echo "  network-policies - Apply network policies for security"
 	@echo "  logcollector     - Deploy Vector (Log Collector) with Helm"
-	@echo "  destroy          - Uninstall Helm releases and destroy Terraform resources"
+	@echo "  destroy          - Uninstall Helm releases (optionally destroy Terraform)"
 	@echo "  clean            - Remove Terraform state files"
 	@echo ""
 	@echo "Run 'make <command>' to execute."
 
-## 🚀 Terraform - Generate Execution Plan and Save It
+## ⚙️ Apply sysctl configuration (required for OpenSearch)
+sysctl:
+	kubectl apply -f sysctl-daemonset.yaml
+
+## 🚀 Terraform - Generate Execution Plan and Save It (Azure only)
 infra-plan:
 	cd $(TERRAFORM_DIR) && terraform init
 	cd $(TERRAFORM_DIR) && terraform plan -out=$(TF_PLAN_OUTPUT)
 
-## 🚀 Terraform - Apply the Execution Plan
+## 🚀 Terraform - Apply the Execution Plan (Azure only)
 infra-apply: infra-plan
 	cd $(TERRAFORM_DIR) && terraform apply $(TF_PLAN_OUTPUT)
 
-## 🚀 Terraform - Run Both Plan & Apply
+## 🚀 Terraform - Run Both Plan & Apply (Azure only)
 infra: infra-apply
 
 ## 🔍 Deploy OpenSearch (StatefulSet) with Helm
@@ -81,10 +86,15 @@ destroy:
 	helm uninstall opensearch-dashboards --namespace $(K8S_NAMESPACE_OPENSEARCH) --ignore-not-found
 	helm uninstall vector --namespace $(K8S_NAMESPACE_VECTOR) --ignore-not-found
 	
+	@echo "Deleting sysctl DaemonSet..."
+	kubectl delete -f sysctl-daemonset.yaml --ignore-not-found
+	
 	@echo "Deleting Kubernetes namespaces..."
 	kubectl delete namespace $(K8S_NAMESPACE_OPENSEARCH) --ignore-not-found
 	kubectl delete namespace $(K8S_NAMESPACE_VECTOR) --ignore-not-found
 
+## 🔥 Destroy All Resources including Terraform (Azure only)
+destroy-all: destroy
 	@echo "Destroying Terraform resources..."
 	cd $(TERRAFORM_DIR) && terraform destroy -auto-approve
 

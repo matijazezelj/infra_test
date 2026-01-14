@@ -12,44 +12,77 @@ The architecture includes:
 
 Before getting started, ensure the following tools are installed:
 
-- [Terraform](https://www.terraform.io/downloads.html)
 - [Helm](https://helm.sh/docs/intro/install/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
-- Access to a Kubernetes cluster (e.g., Azure Kubernetes Service)
+- Access to a Kubernetes cluster (GKE, EKS, AKS, or any other)
+- (Optional) [Terraform](https://www.terraform.io/downloads.html) - only if provisioning infrastructure
+
+### Cloud-Specific Requirements
+
+| Cloud | Network Policy CNI | Storage Class |
+|-------|-------------------|---------------|
+| **GKE** | Enable Dataplane V2 or Calico | `standard` (default) or `premium-rwo` |
+| **EKS** | Install Calico or Cilium | `gp2` (default) or `gp3` |
+| **AKS** | Enable Azure Network Policies | `managed-premium` or `default` |
 
 ## Setup Overview
 
 The setup is divided into the following steps:
 
-1. **Terraform**: Provision the necessary cloud resources with security hardening.
-2. **Secrets**: Create Kubernetes secrets for credentials (never commit to git).
-3. **Helm**: Deploy OpenSearch and OpenSearch Dashboards.
-4. **Network Policies**: Apply network segmentation for security.
-5. **Vector**: Collect and forward logs to OpenSearch.
+1. **Cluster Setup**: Ensure your Kubernetes cluster has Network Policy support enabled.
+2. **Sysctl Configuration**: Apply the sysctl DaemonSet (required for OpenSearch).
+3. **Secrets**: Create Kubernetes secrets for credentials (never commit to git).
+4. **Helm**: Deploy OpenSearch and OpenSearch Dashboards.
+5. **Network Policies**: Apply network segmentation for security.
+6. **Vector**: Collect and forward logs to OpenSearch.
+
+> **Note**: Terraform is optional. This setup works with any Kubernetes cluster.
 
 ## Steps
 
-### 1. Provision Cloud Infrastructure with Terraform
+### 1. Cluster Setup & Prerequisites
 
-This step sets up a security-hardened AKS cluster with:
-- Azure Network Policies enabled
-- Azure Policy for Kubernetes enabled
-- Log Analytics monitoring
-- Private node IPs (no public exposure)
-- RBAC enabled
+#### Option A: Use Existing Cluster
+
+Ensure your cluster has:
+- Network Policy support enabled (CNI: Calico, Cilium, or cloud-native)
+- At least 3 nodes with 4GB RAM each (for OpenSearch)
+- A default StorageClass for persistent volumes
+
+**GKE Quick Setup:**
+```bash
+# Create cluster with Dataplane V2 (includes Network Policy support)
+gcloud container clusters create my-cluster \
+  --enable-dataplane-v2 \
+  --zone us-central1-a \
+  --num-nodes 3 \
+  --machine-type e2-standard-2
+
+# Get credentials
+gcloud container clusters get-credentials my-cluster --zone us-central1-a
+```
+
+**EKS Quick Setup:**
+```bash
+# Create cluster (install Calico addon separately for Network Policies)
+eksctl create cluster --name my-cluster --region us-east-1 --nodes 3
+```
+
+#### Option B: Use Terraform (Azure AKS)
 
 ```bash
-# Initialize and plan
-make infra-plan
-
-# Apply the configuration
-make infra-apply
-
-# Or run both together
 make infra
 ```
 
-### 2. Create Kubernetes Secrets
+### 2. Apply Sysctl Configuration
+
+OpenSearch requires `vm.max_map_count=262144`. Apply the DaemonSet:
+
+```bash
+kubectl apply -f sysctl-daemonset.yaml
+```
+
+### 3. Create Kubernetes Secrets
 
 ⚠️ **IMPORTANT**: Never commit passwords to version control!
 
@@ -74,7 +107,7 @@ kubectl create secret generic opensearch-credentials \
 
 > **Tip**: For production, use [External Secrets Operator](https://external-secrets.io/) or [HashiCorp Vault](https://www.vaultproject.io/) for secrets management.
 
-### 3. Deploy OpenSearch with Helm
+### 4. Deploy OpenSearch with Helm
 
 Deploy **OpenSearch** with security features enabled:
 
@@ -88,7 +121,7 @@ This command will:
 - Run as non-root user with security context.
 - Set the service type to **ClusterIP** (internal only).
 
-### 4. Deploy OpenSearch Dashboards
+### 5. Deploy OpenSearch Dashboards
 
 Deploy **OpenSearch Dashboards** with security hardening:
 
@@ -102,7 +135,7 @@ This command will:
 - Run as non-root user.
 - Use Kubernetes Secrets for authentication.
 
-### 5. Apply Network Policies
+### 6. Apply Network Policies
 
 Restrict network traffic between components:
 
@@ -116,7 +149,7 @@ This applies network policies that:
 - Restrict ingress to Dashboards from ingress controller only.
 - Allow OpenSearch inter-node communication on port 9300.
 
-### 6. Deploy Vector for Log Collection
+### 7. Deploy Vector for Log Collection
 
 Deploy **Vector** as a DaemonSet for log collection:
 
@@ -131,7 +164,58 @@ This command will:
 - Use disk-based buffering for reliability.
 - Parse and enrich logs with transforms.
 
-### 7. Access the Services
+---
+
+## Manual Deployment (Without Makefile)
+
+If you prefer to run Helm commands directly without the Makefile:
+
+```bash
+# 1. Apply sysctl (required for OpenSearch)
+kubectl apply -f sysctl-daemonset.yaml
+
+# 2. Create namespaces
+kubectl create namespace opensearch
+kubectl create namespace vector
+
+# 3. Create secrets
+kubectl create secret generic opensearch-admin-secret \
+  --namespace opensearch \
+  --from-literal=username='admin' \
+  --from-literal=password='YOUR_PASSWORD'
+
+kubectl create secret generic opensearch-credentials \
+  --namespace vector \
+  --from-literal=username='admin' \
+  --from-literal=password='YOUR_PASSWORD'
+
+# 4. Add Helm repos
+helm repo add opensearch https://opensearch-project.github.io/helm-charts/
+helm repo add vector https://helm.vector.dev
+helm repo update
+
+# 5. Deploy OpenSearch
+helm upgrade --install opensearch opensearch/opensearch \
+  --namespace opensearch \
+  --values opensearch-values.yaml
+
+# 6. Deploy OpenSearch Dashboards
+helm upgrade --install opensearch-dashboards opensearch/opensearch-dashboards \
+  --namespace opensearch \
+  --values opensearch-dashboards-values.yaml
+
+# 7. Apply network policies
+kubectl apply -f network-policies.yaml
+
+# 8. Deploy Vector
+helm upgrade --install vector vector/vector \
+  --namespace vector \
+  --values vector-values.yaml
+```
+
+---
+
+### 8. Access the Services
 
 #### OpenSearch Dashboards (Recommended: Use Ingress)
 
@@ -172,6 +256,30 @@ kubectl port-forward svc/opensearch-dashboards 5601:5601 -n opensearch
 
 Then access at: `http://localhost:5601`
 
+**GKE-specific: Using GKE Ingress**
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: opensearch-dashboards
+  namespace: opensearch
+  annotations:
+    kubernetes.io/ingress.class: gce
+    kubernetes.io/ingress.global-static-ip-name: dashboards-ip
+spec:
+  rules:
+    - host: dashboards.yourdomain.com
+      http:
+        paths:
+          - path: /*
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: opensearch-dashboards
+                port:
+                  number: 5601
+```
+
 #### OpenSearch API (Internal)
 
 OpenSearch is internally accessible via:
@@ -180,7 +288,7 @@ OpenSearch is internally accessible via:
 https://opensearch-cluster-master.opensearch.svc.cluster.local:9200
 ```
 
-### 8. Cleanup
+### 9. Cleanup
 
 To tear down the entire setup:
 
@@ -216,13 +324,11 @@ This will:
 
 This setup implements the following security best practices:
 
-### Infrastructure (Terraform)
-- ✅ Azure Network Policies enabled for pod-to-pod traffic control
-- ✅ Azure Policy for Kubernetes enabled
-- ✅ Log Analytics workspace for audit logging
-- ✅ Private node IPs (no public exposure)
+### Infrastructure
+- ✅ Network Policies for pod-to-pod traffic control (any CNI)
+- ✅ Works on GKE, EKS, AKS, or bare-metal Kubernetes
 - ✅ RBAC enabled
-- ✅ System-assigned managed identity
+- ✅ Persistent storage for OpenSearch data
 
 ### Kubernetes Secrets
 - ✅ No hardcoded passwords in configuration files
@@ -278,8 +384,9 @@ Ensure you created the secrets manually as described in Step 2.
 ├── Makefile                       # Deployment automation
 ├── README.md                      # This file
 ├── .gitignore                     # Prevents secret commits
-├── terraform/
-│   └── main.tf                    # AKS infrastructure with security
+├── sysctl-daemonset.yaml          # vm.max_map_count config (required)
+├── terraform/                     # (Optional) Azure AKS provisioning
+│   └── main.tf
 ├── opensearch-values.yaml         # OpenSearch Helm values
 ├── opensearch-dashboards-values.yaml  # Dashboards Helm values
 ├── vector-values.yaml             # Vector Helm values
@@ -287,6 +394,13 @@ Ensure you created the secrets manually as described in Step 2.
 ├── opensearch-secret.yaml         # Secret template (DO NOT USE IN PROD)
 └── rbac.yaml                      # RBAC for Vector
 ```
+
+## Tested Platforms
+
+- ✅ Google Kubernetes Engine (GKE)
+- ✅ Amazon Elastic Kubernetes Service (EKS)
+- ✅ Azure Kubernetes Service (AKS)
+- ✅ Minikube / kind (local development)
 
 ---
 
