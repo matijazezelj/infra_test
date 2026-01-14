@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  # The binding name
+  name: vector-cluster-role-binding
+subjects:
+  - kind: ServiceAccount
+    name: vector
+    namespace: vector # Ensure this matches the namespace where Vector is deployed
+roleRef:
+  kind: ClusterRole
+  name: vector-cluster-role
+  apiGroup: rbac.authorization.k8s.io

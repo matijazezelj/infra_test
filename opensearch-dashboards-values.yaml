@@ -1,16 +1,50 @@
 opensearchHosts: "https://opensearch-cluster-master:9200"
 
-## Authentication
+## Authentication - Use Kubernetes Secrets (never plain text)
 extraEnvs:
   - name: "OPENSEARCH_USERNAME"
-    value: "admin"
+    valueFrom:
+      secretKeyRef:
+        name: opensearch-admin-secret
+        key: username
   - name: "OPENSEARCH_PASSWORD"
-    value: "YourStrongPassword1!"
+    valueFrom:
+      secretKeyRef:
+        name: opensearch-admin-secret
+        key: password
 
 ## Service Exposure
+## SECURITY: Use ClusterIP + Ingress with TLS instead of LoadBalancer
+## LoadBalancer exposes service directly to internet without TLS
 service:
-  type: LoadBalancer
+  type: ClusterIP
   port: 5601
+  annotations: {}
 
 ## Replica Count
 replicas: 1
+
+## Security Context - Run as non-root
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+
+## TLS Configuration
+config:
+  opensearch_security.cookie.secure: true
+  opensearch_security.cookie.isSameSite: "Strict"
+  server.ssl.enabled: false  # Enable when using ingress with TLS termination
+
+## Resource Limits
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi

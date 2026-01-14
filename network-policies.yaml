@@ -1,0 +1,160 @@
+# Network Policies for OpenSearch Stack
+# Restricts network traffic to only what's necessary
+---
+# OpenSearch Network Policy - Only allow traffic from Vector and Dashboards
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opensearch-network-policy
+  namespace: opensearch
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: opensearch
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from OpenSearch Dashboards
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opensearch
+          podSelector:
+            matchLabels:
+              app: opensearch-dashboards
+      ports:
+        - protocol: TCP
+          port: 9200
+    # Allow from Vector
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vector
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vector
+      ports:
+        - protocol: TCP
+          port: 9200
+    # Allow inter-node communication (cluster formation)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opensearch
+      ports:
+        - protocol: TCP
+          port: 9300
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow inter-node communication
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opensearch
+      ports:
+        - protocol: TCP
+          port: 9300
+---
+# OpenSearch Dashboards Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: opensearch-dashboards-network-policy
+  namespace: opensearch
+spec:
+  podSelector:
+    matchLabels:
+      app: opensearch-dashboards
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from ingress controller (or specific IPs)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 5601
+    # Allow from same namespace for health checks
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5601
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow to OpenSearch
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: opensearch
+      ports:
+        - protocol: TCP
+          port: 9200
+---
+# Vector Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vector-network-policy
+  namespace: vector
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8686
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow to OpenSearch
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opensearch
+      ports:
+        - protocol: TCP
+          port: 9200
+    # Allow to Kubernetes API (for log collection)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443

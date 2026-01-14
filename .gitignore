@@ -35,3 +35,48 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# ========================
+# Security - NEVER commit secrets
+# ========================
+# Secret files (except examples)
+*-secret.yaml
+*-secrets.yaml
+!*-secret.yaml.example
+!*-secrets.yaml.example
+
+# Certificates and keys
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Kubeconfig
+kubeconfig
+kubeconfig.*
+.kube/
+
+# ========================
+# IDE and OS
+# ========================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+

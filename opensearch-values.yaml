@@ -1,5 +1,5 @@
 clusterName: "opensearch-cluster"
-nodeGroup: "opensearch"
+nodeGroup: "master"
 
 ## Node Settings
 replicas: 3
@@ -10,7 +10,27 @@ persistence:
 ## Authentication Setup (Secret for admin user)
 extraEnvs:
   - name: "OPENSEARCH_INITIAL_ADMIN_PASSWORD"
-    value: "YourStrongPassword1!"
+    valueFrom:
+      secretKeyRef:
+        name: opensearch-admin-secret
+        key: password
+
+## Security Context - Run as non-root
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+## Network Policy - Restrict traffic
+networkPolicy:
+  create: true
+  http:
+    enabled: true
 
 ## Security Settings
 opensearchSecurity:

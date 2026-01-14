@@ -6,7 +6,7 @@ K8S_NAMESPACE_OPENSEARCH=opensearch
 K8S_NAMESPACE_VECTOR=vector
 TF_PLAN_OUTPUT=tfplan.out
 
-.PHONY: help infra infra-plan infra-apply search dashboard logcollector destroy clean
+.PHONY: help infra infra-plan infra-apply search dashboard logcollector destroy clean secrets network-policies
 
 ## 🆘 Display help message with available commands
 help:
@@ -18,6 +18,8 @@ help:
 	@echo "  infra            - Run both plan and apply"
 	@echo "  search           - Deploy OpenSearch (StatefulSet) with Helm"
 	@echo "  dashboard        - Deploy OpenSearch Dashboards with Helm"
+	@echo "  secrets          - Create Kubernetes secrets for Vector"
+	@echo "  network-policies - Apply network policies for security"
 	@echo "  logcollector     - Deploy Vector (Log Collector) with Helm"
 	@echo "  destroy          - Uninstall Helm releases and destroy Terraform resources"
 	@echo "  clean            - Remove Terraform state files"
@@ -51,6 +53,18 @@ dashboard:
 	helm upgrade --install opensearch-dashboards opensearch/opensearch-dashboards \
 	  --create-namespace --namespace $(K8S_NAMESPACE_OPENSEARCH) \
 	  --values opensearch-dashboards-values.yaml
+
+## � Create Kubernetes secrets for Vector
+secrets:
+	kubectl create namespace $(K8S_NAMESPACE_VECTOR) --dry-run=client -o yaml | kubectl apply -f -
+	kubectl create namespace $(K8S_NAMESPACE_OPENSEARCH) --dry-run=client -o yaml | kubectl apply -f -
+	@echo "⚠️  IMPORTANT: Create secrets with your actual passwords:"
+	@echo "kubectl create secret generic opensearch-credentials --namespace $(K8S_NAMESPACE_VECTOR) --from-literal=username='admin' --from-literal=password='YOUR_SECURE_PASSWORD'"
+	@echo "kubectl create secret generic opensearch-admin-secret --namespace $(K8S_NAMESPACE_OPENSEARCH) --from-literal=username='admin' --from-literal=password='YOUR_SECURE_PASSWORD'"
+
+## 🔒 Apply network policies for security
+network-policies:
+	kubectl apply -f network-policies.yaml
 
 ## 📥 Deploy Vector (Log Collector) with Helm
 logcollector:
