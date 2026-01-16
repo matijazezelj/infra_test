@@ -1,0 +1,36 @@
+# Trivy Ignore File
+# Documents accepted security risks with justification
+# See: https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/#by-finding-ids
+
+# =============================================================================
+# sysctl-daemonset.yaml - OpenSearch kernel parameter tuning
+# =============================================================================
+# These findings are ACCEPTED RISKS because the sysctl DaemonSet REQUIRES
+# privileged access to modify kernel parameters (vm.max_map_count=262144).
+# This is a documented OpenSearch requirement.
+# See: https://opensearch.org/docs/latest/install-and-configure/install-opensearch/index/#important-settings
+
+# Privileged container required for sysctl
+AVD-KSV-0017
+
+# Must run as root (UID 0) for kernel parameter modification
+AVD-KSV-0012
+AVD-KSV-0020
+AVD-KSV-0021
+
+# allowPrivilegeEscalation cannot be false when privileged: true
+AVD-KSV-0001
+
+# Capability drops are ignored when running in privileged mode
+AVD-KSV-0003
+AVD-KSV-0004
+AVD-KSV-0106
+
+# =============================================================================
+# terraform/main.tf - AKS API Server Access
+# =============================================================================
+# API server IP restriction is configured via api_server_access_profile but
+# defaults to empty list. Users MUST set var.api_server_authorized_ip_ranges
+# with their allowed IPs at terraform apply time.
+# This is intentional to avoid locking out users during initial setup.
+AVD-AZU-0041

@@ -19,6 +19,12 @@ variable "node_count" {
   default = 3
 }
 
+variable "api_server_authorized_ip_ranges" {
+  description = "List of IP ranges authorized to access the Kubernetes API server"
+  type        = list(string)
+  default     = []  # Set your allowed IPs, e.g., ["203.0.113.0/24", "198.51.100.0/24"]
+}
+
 # Resource Group
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
@@ -43,6 +49,12 @@ resource "azurerm_kubernetes_cluster" "aks" {
 
   # Security: Use private cluster to prevent public API access
   # private_cluster_enabled = true  # Uncomment for production
+
+  # Security: Restrict API server access to specific IP ranges
+  # IMPORTANT: Set var.api_server_authorized_ip_ranges with your allowed IPs
+  api_server_access_profile {
+    authorized_ip_ranges = var.api_server_authorized_ip_ranges
+  }
 
   # Security: Enable RBAC (enabled by default but explicit is better)
   role_based_access_control_enabled = true

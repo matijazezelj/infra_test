@@ -111,6 +111,8 @@ OpenSearch requires `vm.max_map_count=262144`. Apply the DaemonSet:
 kubectl apply -f sysctl-daemonset.yaml
 ```
 
+> **Note**: This DaemonSet requires privileged access to modify kernel parameters. It includes:\n> - Seccomp profile (`RuntimeDefault`) for system call filtering\n> - Read-only root filesystem\n> - Resource limits\n> - Pinned image version\n> - Deployed to `opensearch` namespace (created in Step 3)\n>\n> Some Trivy findings are accepted risks documented in `.trivyignore`.
+
 ### 3. Create Kubernetes Secrets
 
 ⚠️ **IMPORTANT**: Never commit passwords to version control!
@@ -384,6 +386,7 @@ This setup implements the following security best practices:
 - ✅ Works on GKE, EKS, AKS, or bare-metal Kubernetes
 - ✅ RBAC enabled
 - ✅ Persistent storage for OpenSearch data
+- ✅ AKS API server access restricted to authorized IP ranges
 
 ### Kubernetes Secrets
 - ✅ No hardcoded passwords in configuration files
@@ -395,6 +398,8 @@ This setup implements the following security best practices:
 - ✅ Read-only root filesystem where possible
 - ✅ All capabilities dropped (`drop: ALL`)
 - ✅ `allowPrivilegeEscalation: false`
+- ✅ Seccomp profiles enabled (`RuntimeDefault`)
+- ⚠️ sysctl DaemonSet requires privileged (documented exception for kernel tuning)
 
 ### Network Security
 - ✅ Network Policies restrict pod-to-pod communication

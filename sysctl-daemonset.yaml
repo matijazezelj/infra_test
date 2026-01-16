@@ -2,7 +2,10 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: sysctl-daemonset
-  namespace: kube-system
+  namespace: opensearch
+  labels:
+    app.kubernetes.io/name: sysctl-tuner
+    app.kubernetes.io/component: kernel-config
 spec:
   selector:
     matchLabels:
@@ -12,11 +15,30 @@ spec:
       labels:
         name: sysctl-daemonset
     spec:
-      hostPID: true
+      # Note: This DaemonSet requires privileged access to modify kernel parameters
+      # for OpenSearch (vm.max_map_count). This is a known requirement.
+      # See: https://opensearch.org/docs/latest/install-and-configure/install-opensearch/index/#important-settings
+      # 
+      # The following Trivy findings are ACCEPTED RISKS (documented in .trivyignore):
+      # - AVD-KSV-0001, AVD-KSV-0012, AVD-KSV-0017: Privileged/root required for sysctl
+      # - AVD-KSV-0003, AVD-KSV-0004, AVD-KSV-0106: Capabilities ignored when privileged
+      # - AVD-KSV-0020, AVD-KSV-0021: Must run as root (UID 0)
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: sysctl
-          image: busybox
+          image: busybox:1.36
           command:
             ["sh", "-c", "sysctl -w vm.max_map_count=262144 && sleep infinity"]
           securityContext:
+            # Privileged is required for sysctl kernel parameter modification
             privileged: true
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
