@@ -42,13 +42,16 @@ opensearchSecurity:
       dataComplete: true
       data:
         # Internal users configuration (adding admin user)
+        # Password is set via OPENSEARCH_INITIAL_ADMIN_PASSWORD env var from opensearch-admin-secret
         internal_users.yml: |
+          _meta:
+            type: "internalusers"
+            config_version: 2
           admin:
-            hash: "$2a$12$w5bMG5n87vFq2esnpt8wPoa5Idv6FbmAMQFqgGomN3m35pZ.Qqg8m"  # This is bcrypt hash of "YourStrongPassword1!"
-            roles:
-              - admin
-            description: "Admin User"
-            enabled: true
+            reserved: true
+            backend_roles:
+              - "admin"
+            description: "Admin user - password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD env var"
         roles.yml: |
           admin:
             cluster:
