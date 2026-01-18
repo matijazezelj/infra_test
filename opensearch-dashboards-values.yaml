@@ -25,20 +25,22 @@ service:
 replicas: 1
 
 ## Security Context - Run as non-root
+## Note: securityContext is container-level (no fsGroup allowed)
+##       podSecurityContext is pod-level (fsGroup goes here)
 securityContext:
+  runAsUser: 1000
+  runAsNonRoot: true
+
+podSecurityContext:
   runAsUser: 1000
   runAsGroup: 1000
   fsGroup: 1000
 
-podSecurityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-
 ## TLS Configuration
 config:
-  opensearch_security.cookie.secure: true
+  opensearch_security.cookie.secure: "true"
   opensearch_security.cookie.isSameSite: "Strict"
-  server.ssl.enabled: false  # Enable when using ingress with TLS termination
+  server.ssl.enabled: "false"  # Enable when using ingress with TLS termination
 
 ## Resource Limits
 resources:

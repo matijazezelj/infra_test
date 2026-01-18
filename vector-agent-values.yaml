@@ -15,28 +15,23 @@ service:
       protocol: TCP
       targetPort: 8686
 
-# Environment variables
-env:
-  - name: VECTOR_LOG
-    value: "info"
-  # Dynamically get the node name from the Kubernetes downward API
-  - name: VECTOR_SELF_NODE_NAME
-    valueFrom:
-      fieldRef:
-        fieldPath: spec.nodeName
+# Environment variables - Note: VECTOR_LOG and VECTOR_SELF_NODE_NAME are set by the chart
+# Only add custom env vars here if needed
+# env: []
 
 # Pod configuration
 podAnnotations:
   prometheus.io/scrape: "true"
   prometheus.io/port: "8686"
 
-# Security context - run as non-root with minimal privileges
-securityContext:
+# Security context - pod level (fsGroup goes here)
+podSecurityContext:
   runAsUser: 1000
   runAsGroup: 1000
   fsGroup: 1000
 
-containerSecurityContext:
+# Container security context (no fsGroup allowed here)
+securityContext:
   runAsNonRoot: true
   runAsUser: 1000
   allowPrivilegeEscalation: false

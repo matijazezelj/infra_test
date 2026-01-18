@@ -16,14 +16,15 @@ extraEnvs:
         key: password
 
 ## Security Context - Run as non-root
+## Note: securityContext is container-level (no fsGroup allowed)
+##       podSecurityContext is pod-level (fsGroup goes here)
 securityContext:
   runAsUser: 1000
-  runAsGroup: 1000
-  fsGroup: 1000
+  runAsNonRoot: true
 
 podSecurityContext:
-  runAsNonRoot: true
   runAsUser: 1000
+  runAsGroup: 1000
   fsGroup: 1000
 
 ## Network Policy - Restrict traffic
